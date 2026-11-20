@@ -5,52 +5,42 @@ on:
   workflow_dispatch:
     inputs:
       MANIFEST_URL:
-        description: 'TWRP manifest URL'
+        description: "TWRP manifest URL"
         required: true
-        default: 'https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp'
+        default: "https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp"
 
       MANIFEST_BRANCH:
-        description: 'TWRP manifest branch'
+        description: "TWRP manifest branch"
         required: true
-        default: 'twrp-12.1'
+        default: "twrp-12.1"
 
       DEVICE_TREE_URL:
-        description: 'BF7 device tree URL'
+        description: "BF7 device tree URL"
         required: true
-        default: 'https://github.com/legendary0op/android_device_tecno_TECNO-BF7'
+        default: "https://github.com/legendary0op/android_device_tecno_TECNO-BF7"
 
       DEVICE_TREE_BRANCH:
-        description: 'BF7 device tree branch'
+        description: "Device tree branch"
         required: true
-        default: 'main'
+        default: "main"
 
       DEVICE_PATH:
-        description: 'Device path'
+        description: "Device tree path"
         required: true
-        default: 'device/tecno/BF7'
-
-      COMMON_TREE_URL:
-        description: 'Common tree URL (leave blank if not needed)'
-        required: false
-        default: ''
-
-      COMMON_PATH:
-        description: 'Common tree path (leave blank if not needed)'
-        required: false
-        default: ''
+        default: "device/tecno/BF7"
 
       DEVICE_NAME:
-        description: 'Device name'
+        description: "Device codename"
         required: true
-        default: 'BF7'
+        default: "BF7"
 
       MAKEFILE_NAME:
-        description: 'Lunch target name without -eng'
+        description: "Lunch product name"
         required: true
-        default: 'twrp_BF7'
+        default: "twrp_BF7"
 
       BUILD_TARGET:
-        description: 'Build target'
+        description: "Build target"
         required: true
         type: choice
         options:
@@ -61,119 +51,179 @@ on:
 
 jobs:
   build:
-    if: github.event.repository.owner.id == github.event.sender.id
+    name: Build TWRP for BF7
     runs-on: ubuntu-22.04
-
-    permissions:
-      contents: write
+    timeout-minutes: 360
 
     steps:
-      - name: Display Run Parameters
-        run: |
-          echo "Manifest URL: ${{ github.event.inputs.MANIFEST_URL }}"
-          echo "Manifest Branch: ${{ github.event.inputs.MANIFEST_BRANCH }}"
-          echo "Device Tree URL: ${{ github.event.inputs.DEVICE_TREE_URL }}"
-          echo "Device Tree Branch: ${{ github.event.inputs.DEVICE_TREE_BRANCH }}"
-          echo "Device Path: ${{ github.event.inputs.DEVICE_PATH }}"
-          echo "Device Name: ${{ github.event.inputs.DEVICE_NAME }}"
-          echo "Makefile Name: ${{ github.event.inputs.MAKEFILE_NAME }}"
-          echo "Build Target: ${{ github.event.inputs.BUILD_TARGET }}"
-
-      - name: Check Out
+      - name: Checkout workflow repository
         uses: actions/checkout@v4
 
-      - name: Cleanup
-        uses: rokibhasansagar/slimhub_actions@main
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          df -h
 
-      - name: Prepare the environment
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y gperf gcc-multilib g++-multilib libc6-dev lib32ncurses-dev x11proto-core-dev libx11-dev tree lib32z-dev libgl1-mesa-dev libxml2-utils xsltproc bc ccache lib32readline-dev lib32z1-dev lz4 libncurses-dev libsdl1.2-dev libwxgtk3.0-gtk3-dev libxml2 lzop pngcrush schedtool squashfs-tools imagemagick libbz2-dev lzma ncftp qemu-user-static python3
+          sudo apt-get install -y \
+            bc \
+            bison \
+            build-essential \
+            ccache \
+            curl \
+            flex \
+            g++-multilib \
+            gcc-multilib \
+            git \
+            git-lfs \
+            gnupg \
+            gperf \
+            imagemagick \
+            lib32ncurses-dev \
+            lib32readline-dev \
+            lib32z1-dev \
+            libelf-dev \
+            liblz4-tool \
+            libncurses-dev \
+            libssl-dev \
+            libxml2 \
+            libxml2-utils \
+            lzop \
+            pngcrush \
+            python3 \
+            python-is-python3 \
+            rsync \
+            schedtool \
+            squashfs-tools \
+            unzip \
+            xsltproc \
+            zip \
+            zlib1g-dev
 
-      - name: Install OpenJDK
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'zulu'
-          java-version: '8'
-
-      - name: Setup SSH Keys
-        if: ${{ startsWith(github.event.inputs.MANIFEST_URL, 'git@github.com') || startsWith(github.event.inputs.DEVICE_TREE_URL, 'git@github.com') || startsWith(github.event.inputs.COMMON_TREE_URL, 'git@github.com') }}
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
-
-      - name: Install repo
+      - name: Configure Git
         run: |
-          mkdir -p ~/bin
-          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
-          chmod a+x ~/bin/repo
-          sudo ln -sf ~/bin/repo /usr/bin/repo
-
-      - name: Initialize repo
-        run: |
-          mkdir -p workspace
-          cd workspace
-          echo "workspace-folder=$(pwd)" >> $GITHUB_OUTPUT
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
-          repo init --depth=1 -u "${{ github.event.inputs.MANIFEST_URL }}" -b "${{ github.event.inputs.MANIFEST_BRANCH }}"
-        id: pwd
 
-      - name: Repo Sync
+      - name: Install Repo
         run: |
-          repo sync -j$(nproc --all) --force-sync
-        working-directory: workspace
+          mkdir -p "$HOME/bin"
+          curl -L https://storage.googleapis.com/git-repo-downloads/repo \
+            -o "$HOME/bin/repo"
+          chmod a+x "$HOME/bin/repo"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
 
-      - name: Clone device tree
+      - name: Initialize TWRP source
         run: |
-          git clone "${{ github.event.inputs.DEVICE_TREE_URL }}" -b "${{ github.event.inputs.DEVICE_TREE_BRANCH }}" "${{ github.event.inputs.DEVICE_PATH }}"
-        working-directory: workspace
+          mkdir -p "$GITHUB_WORKSPACE/twrp"
+          cd "$GITHUB_WORKSPACE/twrp"
 
-      - name: Clone common tree
-        if: ${{ github.event.inputs.COMMON_TREE_URL != '' && github.event.inputs.COMMON_PATH != '' }}
+          repo init \
+            -u "${{ inputs.MANIFEST_URL }}" \
+            -b "${{ inputs.MANIFEST_BRANCH }}" \
+            --depth=1
+
+      - name: Sync TWRP source
         run: |
-          git clone "${{ github.event.inputs.COMMON_TREE_URL }}" -b "${{ github.event.inputs.DEVICE_TREE_BRANCH }}" "${{ github.event.inputs.COMMON_PATH }}"
-        working-directory: workspace
+          cd "$GITHUB_WORKSPACE/twrp"
 
-      - name: Check Build Tree
-        uses: haya14busa/action-cond@v1
-        id: buildtree
-        with:
-          cond: ${{ github.event.inputs.MANIFEST_BRANCH == 'twrp-11' || github.event.inputs.MANIFEST_BRANCH == 'twrp-12.1' }}
-          if_true: twrp
-          if_false: omni
+          repo sync \
+            -c \
+            -j2 \
+            --force-sync \
+            --no-clone-bundle \
+            --no-tags
 
-      - name: Sync Device Dependencies
+      - name: Clone BF7 device tree
         run: |
-          bash "${GITHUB_WORKSPACE}/scripts/convert.sh" "${{ github.event.inputs.DEVICE_PATH }}/${{ steps.buildtree.outputs.value }}.dependencies"
-          repo sync -j$(nproc --all)
-        working-directory: workspace
-        continue-on-error: true
+          cd "$GITHUB_WORKSPACE/twrp"
 
-      - name: Set Swap Space
-        uses: pierotofy/set-swap-space@master
-        with:
-          swap-size-gb: 12
+          git clone \
+            --depth=1 \
+            -b "${{ inputs.DEVICE_TREE_BRANCH }}" \
+            "${{ inputs.DEVICE_TREE_URL }}" \
+            "${{ inputs.DEVICE_PATH }}"
 
-      - name: Building recovery
+          echo "Device tree contents:"
+          ls -la "${{ inputs.DEVICE_PATH }}"
+
+      - name: Check device tree configuration
         run: |
-          source build/envsetup.sh
+          cd "$GITHUB_WORKSPACE/twrp"
+
+          test -f "${{ inputs.DEVICE_PATH }}/AndroidProducts.mk"
+          test -f "${{ inputs.DEVICE_PATH }}/BoardConfig.mk"
+
+          echo "Device tree configuration found."
+
+      - name: Configure build environment
+        run: |
+          cd "$GITHUB_WORKSPACE/twrp"
+
           export ALLOW_MISSING_DEPENDENCIES=true
-          lunch "${{ github.event.inputs.MAKEFILE_NAME }}-eng" && make clean && mka "${{ github.event.inputs.BUILD_TARGET }}image" -j$(nproc --all)
-        working-directory: workspace
 
-      - name: Upload to Release
-        uses: softprops/action-gh-release@v2
+          source build/envsetup.sh
+
+          lunch "${{ inputs.MAKEFILE_NAME }}-eng"
+
+      - name: Build recovery
+        shell: bash
+        run: |
+          set -o pipefail
+
+          cd "$GITHUB_WORKSPACE/twrp"
+
+          export ALLOW_MISSING_DEPENDENCIES=true
+
+          source build/envsetup.sh
+          lunch "${{ inputs.MAKEFILE_NAME }}-eng"
+
+          echo "Starting TWRP build..."
+
+          case "${{ inputs.BUILD_TARGET }}" in
+            boot)
+              mka bootimage -j2
+              ;;
+            recovery)
+              mka recoveryimage -j2
+              ;;
+            vendorboot)
+              mka vendorbootimage -j2
+              ;;
+            *)
+              echo "Invalid build target"
+              exit 1
+              ;;
+          esac 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
+
+      - name: Show build output
+        if: always()
+        run: |
+          echo "Checking output directory..."
+          ls -lah "$GITHUB_WORKSPACE/twrp/out/target/product/${{ inputs.DEVICE_NAME }}" || true
+
+          echo "Last build log lines:"
+          tail -n 100 "$GITHUB_WORKSPACE/build.log" || true
+
+      - name: Upload recovery image
+        if: success()
+        uses: actions/upload-artifact@v4
         with:
-          files: |
-            workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/${{ github.event.inputs.BUILD_TARGET }}.img
-            workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/*.zip
-            workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/*vendor*.img
-          name: ${{ github.event.inputs.DEVICE_NAME }}-${{ github.run_id }}
-          tag_name: ${{ github.run_id }}
-          body: |
-            Manifest: ${{ github.event.inputs.MANIFEST_BRANCH }}
-            Device: ${{ github.event.inputs.DEVICE_NAME }}
-            Target: ${{ github.event.inputs.BUILD_TARGET }}.img
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: TWRP-BF7-${{ inputs.BUILD_TARGET }}
+          path: |
+            twrp/out/target/product/${{ inputs.DEVICE_NAME }}/*.img
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BF7-build-log
+          path: build.log
+          if-no-files-found: ignore
+          retention-days: 7
